@@ -1,0 +1,110 @@
+Problem: Regression to the mean:
+Curretnly, the model basically picks one word and chooses it all the time. It is chosen with a really low probability
+
+Possible changes:
+-change loss to something more matching a classification (cross entropy for example)
+-change optimizer (maybe momentum is too generic at this state of fragilness. maybe after embedding is premade)
+-increase dropout (seems to help a little bit at 0.2)
+-change activations (doesn't seem to solve the problem)
+-find bug
+-lower batch size
+
+
+Dropout: It seems that with dropout at 0.4, not only one word is chosen, but several (the common ones: THAT, OF, To...).
+That means there is still regression to the mean but a slightly more flexible.
+Now we need somehow to actually make it respond.
+Probable most effective will be to replace loss, because MSE is nutorious for causing this regression behaviour.
+
+
+-Changed loss to cross_entropy, binary cross entropy, and didn't help: (loss gets stuck much more obviously but still same problem)
+-Some experiments adding layer or removing attention, didn't help
+-Analysis of word probability distribution (exponential commonality causes regression to the mean be extremely hard potential barrier)
+	Might be a good idea to weight gradients based on how common the word is.
+-Changing of context and stride size (didn't help, but created a lot of padding which made the model regress to only padding)
+-Changing optimizer to SGD. didn't help. but did seem to create some other but similar regression state
+
+
+Possible more experiments:
+From an experiment using no attention, a suspision arose that maybe the positional embedding is causing problems (maybe two adjacent bias weights don't handle each other great)
+		-Ran a failed experiment(changed commented usage of positional embedding in the wrong class so there was no change. obviously no effect was caused)
+			(STILL A VALID EXPERIMENT TO DO)
+
+Maybe should add activation after attention (currently Relu but commented) (didn't help to bring back the Relu)
+Check into softmax dimension (might be incorrect) (Did not help)
+Maybe need to swap places of y_pred and y_true in the losses (isn't supposed to do such a difference)	 (didn't help)
+
+
+Kind of losing motivation because it seems that it can't learn anything, but on the other hand,
+it does so a bit too suspicously: even if you remove all the attention blocks, and you basically get an autoencoder with positional embedding in the middle,
+You are still stuck in the exact same loss.
+
+In the probable case that there is a bug somewhere, an Identity test should be created to try and create a successfull scenario and stretch it to the wanted one.
+(For example, returning the text itself and checking loss)
+Another thing that should be done is maybe trying to see where most of the gradients are (if the loss is high, there should be high gradients, and loss not coming down because they do not co-operate)
+
+
+Identity test reveiled that the cross entropy loss did not work (same bad loss for perfect output).
+A custom cross entropy function was created (to handle dimensionality better. It seems that the context dimension kind of broke it but not sure).
+
+In addition, the embedding final activation now has softmax.
+The softmax inside the attention mechanism, and inside the decoding are both on the final axis (dim=-1), to be per sample (word/time-frame).
+normalization was temporarily removed (and before, axis was swapped from -2 to -1). It was removed for debugging purposes but the bug was found and had nothing to do with that.
+
+Model currently uses the ResNet feature after each attention block.
+
+When checked basic auto-encoding functionality, it seems to work pretty good. It manages to learn to overfit and reach a very low loss, and from manual checking, also low WER (doesn't really count because it's overfit and given the words in advance, but a good dimensionality reduction test)
+there was a stupid bug where in the inference the input text wasn't given (stt), but the model wasn't trained on that so it gave wierd results.
+
+After positive overfit results, an stt test was ran (mask the input text and try to retrieve it along with the audio).
+It's learning curve is much slower (obviously, a much harder problem), but the results are quite promising:
+it seems that it manages to find 1-3 words out of 8 words in a sample. important note is that the aligning is crappy and probably a word isn't always heard in the sample, so there is a lot of work and testing to be done there.
+In addition, the learning curve seems healthy, and there is a good chance that the classic approach to solve problems might help (lower lr, add layers, increase latent dims)
+
+
+Tasks to complete in weekend:
+V-calculate accuracy (wer)
+-use actual test set for valid checks
+-convert librispeech directory format to a simple stm
+-lazy loading (initialize by creating an index file which calculates where the index falls, and then open the relevant file to that index when called)
+-find a way to find time of a sample and actually hear it
+-effects of padding (different token?, weighted loss, ..., side of padding)
+-context sizes
+-positional encoding (try sinusoidal, try relative)
+-train with lowering amount of masking on the text (like it discovers some)
+-dropout
+
+First, is dropout (because it's simplest)
+
+
+Current best loss is 20.06 (more or less), with context_size(text: 8, audio: 128), stride(1, 60). with <sil> as token
+
+Change: gdt dropout from 0.0 to 0.2 (Seems to slow down the progress so much that it halts).
+	-Result: loss: 27 (after 50 epochs). Seems to catch a lot of the words, but there are duplicates, and not in the correct place.
+(Reverted)
+
+Using sinusoidal positional encoding (requires_grad=False) 
+	-(diagonal matrix: 20.3)
+	-(original[correct one]: worse)
+
+Reverted to normal leanable bias parameter
+
+increased encoding and attention dims to 400 (can't higher because of RAM limits)
+
+increased attention blocks count from 2 to 4 (too slow)
+
+Reverted dims and blocks count
+
+trying to inscrease epochs.
+	-It seems that the loss progress decreases significantly and increasing epoch count from 50 to 250 doesn't pass 19 loss, but the WER dropped from 65.4 to 40.
+	 relation between loss and accuracy seems to be logarithmic (the lower the loss the faster the accuracy will increase in relation to the loss)
+
+*Thought: maybe train the model to only predict the last word each time (harder to create the training environment but will be easier)
+
+Create relative positional encoding (Use a window size and use it in a sliding/1d conv style on the attention samples)
+Split the cross domain attention to be a multi-headed attention
+
+Maybe WER should not count <SIL>
+
+
+Experiment:
+-using original (audio-ctx: 128, sampling_stride: 20), loss can go down faster, but it seems it doesn't keep the same relation to wer (wer remains higher). probably because less possible to work with less audio.
